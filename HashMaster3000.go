@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -35,6 +34,7 @@ type HashGenerator struct {
 	lengthSelect     *widget.Select
 	iterationsSelect *widget.Select
 	outputEntry      *widget.Entry
+	app              fyne.App
 	window           fyne.Window
 	savedSettings    map[string]SavedSetting
 	settingsList     *widget.List
@@ -52,6 +52,7 @@ func main() {
 	settingsFile := filepath.Join(homeDir, ".hashmaster_settings.json")
 
 	generator := &HashGenerator{
+		app:           myApp,
 		window:        myWindow,
 		savedSettings: make(map[string]SavedSetting),
 		settingsFile:  settingsFile,
@@ -229,7 +230,7 @@ func (hg *HashGenerator) generateHash() {
 	hg.outputEntry.SetText(processed)
 
 	// Copy to clipboard
-	hg.window.Clipboard().SetContent(processed)
+	hg.app.Clipboard().SetContent(processed)
 
 	// Show success message
 	//dialog.ShowInformation("Success", "Hash generated and copied to clipboard!", hg.window)
@@ -361,7 +362,7 @@ func (hg *HashGenerator) saveSettingsToFile() error {
 	if err != nil {
 		return err
 	}
-	return ioutil.WriteFile(hg.settingsFile, data, 0644)
+	return os.WriteFile(hg.settingsFile, data, 0644)
 }
 
 func (hg *HashGenerator) loadSettings() error {
@@ -369,7 +370,7 @@ func (hg *HashGenerator) loadSettings() error {
 		return nil // File doesn't exist yet, that's OK
 	}
 
-	data, err := ioutil.ReadFile(hg.settingsFile)
+	data, err := os.ReadFile(hg.settingsFile)
 	if err != nil {
 		return err
 	}
