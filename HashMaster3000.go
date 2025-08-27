@@ -174,12 +174,17 @@ func (hg *HashGenerator) createUI() fyne.CanvasObject {
 	)
 
 	// Create side panel for saved settings
-	sidePanel := container.NewVBox(
-		widget.NewLabel("Saved Settings:"),
-		widget.NewSeparator(),
-		container.NewScroll(hg.settingsList),
+	scrollContainer := container.NewScroll(hg.settingsList)
+	scrollContainer.SetMinSize(fyne.NewSize(250, 400))
+
+	sidePanel := container.NewBorder(
+		container.NewVBox(
+			widget.NewLabel("Saved Settings:"),
+			widget.NewSeparator(),
+		),
+		nil, nil, nil,
+		scrollContainer,
 	)
-	sidePanel.Resize(fyne.NewSize(250, 0))
 
 	// Create horizontal split with main form and settings panel
 	content := container.NewHSplit(form, sidePanel)
