@@ -34,7 +34,6 @@ type HashGenerator struct {
 	lengthSelect     *widget.Select
 	iterationsSelect *widget.Select
 	outputEntry      *widget.Entry
-	maskCheck        *widget.Check
 	window           fyne.Window
 	savedSettings    map[string]SavedSetting
 	settingsList     *widget.List
@@ -133,11 +132,11 @@ func (hg *HashGenerator) setupUI() {
 			key := keys[id]
 			setting := hg.savedSettings[key]
 
-			border := obj.(*container.Border)
+			border := obj.(*fyne.Container)
 			label := border.Objects[0].(*widget.Label)
-			buttonBox := border.Objects[1].(*container.HBox)
-			loadBtn := buttonBox.Objects[0].(*widget.Button)
-			deleteBtn := buttonBox.Objects[1].(*widget.Button)
+			buttons := border.Objects[1].(*fyne.Container)
+			loadBtn := buttons.Objects[0].(*widget.Button)
+			deleteBtn := buttons.Objects[1].(*widget.Button)
 
 			label.SetText(setting.Description)
 
