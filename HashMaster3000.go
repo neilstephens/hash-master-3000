@@ -61,14 +61,12 @@ func (hg *HashGenerator) setupUI() {
 	// Character restriction selection
 	hg.charRestSelect = widget.NewSelect([]string{
 		"All generated chars",
-		"Alphanumeric plus underscore (replace others)",
+		"Alphanumeric (replace others with underscore)",
 		"Alphanumeric (omit others)",
 		"Alpha only",
 		"Numeric only",
-		"Uppercase alpha only",
-		"Lowercase alpha only",
 	}, nil)
-	hg.charRestSelect.SetSelected("All generated chars")
+	hg.charRestSelect.SetSelected("Alphanumeric (replace others with underscore)")
 
 	// Length selection
 	lengthOptions := make([]string, 0)
@@ -76,17 +74,14 @@ func (hg *HashGenerator) setupUI() {
 		lengthOptions = append(lengthOptions, strconv.Itoa(i))
 	}
 	hg.lengthSelect = widget.NewSelect(lengthOptions, nil)
-	hg.lengthSelect.SetSelected("32")
+	hg.lengthSelect.SetSelected("12")
 
 	// Output entry
-	hg.outputEntry = widget.NewEntry()
+	hg.outputEntry = widget.NewPasswordEntry()
 	hg.outputEntry.SetPlaceHolder("Generated hash will appear here...")
-
-	// Mask checkbox
-	hg.maskCheck = widget.NewCheck("Mask output", hg.toggleMask)
 }
 
-func (hg *HashGenerator) createUI() *container.VBox {
+func (hg *HashGenerator) createUI() fyne.CanvasObject {
 	// Create form elements with labels
 	form := container.NewVBox(
 		widget.NewLabel("Description Token:"),
@@ -97,14 +92,13 @@ func (hg *HashGenerator) createUI() *container.VBox {
 		hg.algorithmSelect,
 		widget.NewLabel("Character Restrictions:"),
 		hg.charRestSelect,
-		widget.NewLabel("Output Length:"),
+		widget.NewLabel("Length Truncation:"),
 		hg.lengthSelect,
 		widget.NewSeparator(),
 		widget.NewButton("Generate", hg.generateHash),
 		widget.NewSeparator(),
 		widget.NewLabel("Generated Output:"),
 		hg.outputEntry,
-		hg.maskCheck,
 	)
 
 	return form
@@ -136,20 +130,16 @@ func (hg *HashGenerator) generateHash() {
 	length, _ := strconv.Atoi(hg.lengthSelect.Selected)
 	if len(processed) > length {
 		processed = processed[:length]
-	} else if len(processed) < length {
-		// Pad with additional characters if needed
-		processed = hg.padToLength(processed, length)
 	}
 
 	// Set the output
 	hg.outputEntry.SetText(processed)
-	hg.toggleMask(true)
 
 	// Copy to clipboard
 	hg.window.Clipboard().SetContent(processed)
 
 	// Show success message
-	dialog.ShowInformation("Success", "Hash generated and copied to clipboard!", hg.window)
+	//dialog.ShowInformation("Success", "Hash generated and copied to clipboard!", hg.window)
 }
 
 func (hg *HashGenerator) getHash(input, algorithm string) (string, error) {
@@ -184,7 +174,7 @@ func (hg *HashGenerator) applyCharacterRestrictions(hash, restriction string) st
 	switch restriction {
 	case "All generated chars":
 		return hash
-	case "Alphanumeric plus underscore (replace others)":
+	case "Alphanumeric (replace others with underscore)":
 		re := regexp.MustCompile(`[^a-zA-Z0-9]`)
 		return re.ReplaceAllString(hash, "_")
 	case "Alphanumeric (omit others)":
@@ -199,20 +189,6 @@ func (hg *HashGenerator) applyCharacterRestrictions(hash, restriction string) st
 		// If no numbers found, generate some from the hash
 		if result == "" {
 			return hg.hashToNumbers(hash)
-		}
-		return result
-	case "Uppercase alpha only":
-		re := regexp.MustCompile(`[^A-Z]`)
-		result := re.ReplaceAllString(strings.ToUpper(hash), "")
-		if result == "" {
-			return hg.hashToUppercase(hash)
-		}
-		return result
-	case "Lowercase alpha only":
-		re := regexp.MustCompile(`[^a-z]`)
-		result := re.ReplaceAllString(strings.ToLower(hash), "")
-		if result == "" {
-			return hg.hashToLowercase(hash)
 		}
 		return result
 	default:
@@ -265,44 +241,6 @@ func (hg *HashGenerator) hashToLowercase(hash string) string {
 			result += string('a' + (char % 26))
 		}
 	}
-	return result
-}
-
-func (hg *HashGenerator) padToLength(input string, targetLength int) string {
-	if len(input) >= targetLength {
-		return input[:targetLength]
-	}
-
-	// Generate additional characters based on the restriction type
-	restriction := hg.charRestSelect.Selected
-	charset := ""
-
-	switch restriction {
-	case "All generated chars":
-		charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	case "Alphanumeric plus underscore (replace others)":
-		charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
-	case "Alphanumeric (omit others)":
-		charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	case "Alpha only":
-		charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-	case "Numeric only":
-		charset = "0123456789"
-	case "Uppercase alpha only":
-		charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-	case "Lowercase alpha only":
-		charset = "abcdefghijklmnopqrstuvwxyz"
-	default:
-		charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	}
-
-	result := input
-	for len(result) < targetLength {
-		// Use deterministic padding based on existing content
-		index := len(result) % len(charset)
-		result += string(charset[index])
-	}
-
 	return result
 }
 
