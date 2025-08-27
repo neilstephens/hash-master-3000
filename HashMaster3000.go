@@ -44,7 +44,7 @@ type HashGenerator struct {
 func main() {
 	myApp := app.New()
 	myApp.SetIcon(nil)
-	myWindow := myApp.NewWindow("Hash Generator")
+	myWindow := myApp.NewWindow("Hash Master 3000")
 	myWindow.Resize(fyne.NewSize(800, 600))
 
 	// Get settings file path
@@ -256,17 +256,17 @@ func (hg *HashGenerator) getHash(input, algorithm string) (string, error) {
 
 	switch algorithm {
 	case "SHA-256":
-		cmd = exec.Command("sh", "-c", fmt.Sprintf("echo -n '%s' | sha256sum | cut -d' ' -f1", input))
+		cmd = exec.Command("sh", "-c", fmt.Sprintf("echo -n '%s' | sha256sum | xxd -r -p | base64", input))
 	case "SHA-512":
-		cmd = exec.Command("sh", "-c", fmt.Sprintf("echo -n '%s' | sha512sum | cut -d' ' -f1", input))
+		cmd = exec.Command("sh", "-c", fmt.Sprintf("echo -n '%s' | sha512sum | xxd -r -p | base64", input))
 	case "SHA-1":
-		cmd = exec.Command("sh", "-c", fmt.Sprintf("echo -n '%s' | sha1sum | cut -d' ' -f1", input))
+		cmd = exec.Command("sh", "-c", fmt.Sprintf("echo -n '%s' | sha1sum | xxd -r -p | base64", input))
 	case "MD5":
-		cmd = exec.Command("sh", "-c", fmt.Sprintf("echo -n '%s' | md5sum | cut -d' ' -f1", input))
+		cmd = exec.Command("sh", "-c", fmt.Sprintf("echo -n '%s' | md5sum | xxd -r -p | base64", input))
 	case "SHA-224":
-		cmd = exec.Command("sh", "-c", fmt.Sprintf("echo -n '%s' | sha224sum | cut -d' ' -f1", input))
+		cmd = exec.Command("sh", "-c", fmt.Sprintf("echo -n '%s' | sha224sum | xxd -r -p | base64", input))
 	case "SHA-384":
-		cmd = exec.Command("sh", "-c", fmt.Sprintf("echo -n '%s' | sha384sum | cut -d' ' -f1", input))
+		cmd = exec.Command("sh", "-c", fmt.Sprintf("echo -n '%s' | sha384sum | xxd -r -p | base64", input))
 	default:
 		return "", fmt.Errorf("unsupported algorithm: %s", algorithm)
 	}
@@ -295,32 +295,10 @@ func (hg *HashGenerator) applyCharacterRestrictions(hash, restriction string) st
 	case "Numeric only":
 		re := regexp.MustCompile(`[^0-9]`)
 		result := re.ReplaceAllString(hash, "")
-		// If no numbers found, generate some from the hash
-		if result == "" {
-			return hg.hashToNumbers(hash)
-		}
 		return result
 	default:
 		return hash
 	}
-}
-
-func (hg *HashGenerator) hashToNumbers(hash string) string {
-	result := ""
-	for _, char := range hash {
-		if char >= '0' && char <= '9' {
-			result += string(char)
-		} else if char >= 'a' && char <= 'f' {
-			// Convert hex digits to numbers
-			result += strconv.Itoa(int(char-'a') + 10)
-		} else if char >= 'A' && char <= 'F' {
-			result += strconv.Itoa(int(char-'A') + 10)
-		}
-	}
-	if result == "" {
-		result = "123456" // Fallback
-	}
-	return result
 }
 
 // Settings persistence functions
