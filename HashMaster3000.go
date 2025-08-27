@@ -1,8 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -14,6 +18,13 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
+type SavedSetting struct {
+	Description      string `json:"description"`
+	Algorithm        string `json:"algorithm"`
+	CharRestrictions string `json:"char_restrictions"`
+	Length           string `json:"length"`
+}
+
 type HashGenerator struct {
 	descriptionEntry *widget.Entry
 	masterPassEntry  *widget.Entry
@@ -23,15 +34,28 @@ type HashGenerator struct {
 	outputEntry      *widget.Entry
 	maskCheck        *widget.Check
 	window           fyne.Window
+	savedSettings    map[string]SavedSetting
+	settingsList     *widget.List
+	settingsFile     string
 }
 
 func main() {
 	myApp := app.New()
 	myApp.SetIcon(nil)
 	myWindow := myApp.NewWindow("Hash Generator")
-	myWindow.Resize(fyne.NewSize(600, 500))
+	myWindow.Resize(fyne.NewSize(800, 600))
 
-	generator := &HashGenerator{window: myWindow}
+	// Get settings file path
+	homeDir, _ := os.UserHomeDir()
+	settingsFile := filepath.Join(homeDir, ".hashmaster_settings.json")
+
+	generator := &HashGenerator{
+		window:        myWindow,
+		savedSettings: make(map[string]SavedSetting),
+		settingsFile:  settingsFile,
+	}
+
+	generator.loadSettings()
 	generator.setupUI()
 
 	myWindow.SetContent(generator.createUI())
@@ -79,10 +103,47 @@ func (hg *HashGenerator) setupUI() {
 	// Output entry
 	hg.outputEntry = widget.NewPasswordEntry()
 	hg.outputEntry.SetPlaceHolder("Generated hash will appear here...")
+
+	// Settings list
+	hg.settingsList = widget.NewList(
+		func() int {
+			return len(hg.savedSettings)
+		},
+		func() fyne.CanvasObject {
+			return container.NewHBox(
+				widget.NewLabel("Setting"),
+				widget.NewButton("Load", nil),
+				widget.NewButton("Delete", nil),
+			)
+		},
+		func(id widget.ListItemID, obj fyne.CanvasObject) {
+			keys := hg.getSettingsKeys()
+			if id >= len(keys) {
+				return
+			}
+			key := keys[id]
+			setting := hg.savedSettings[key]
+
+			hbox := obj.(*container.HBox)
+			label := hbox.Objects[0].(*widget.Label)
+			loadBtn := hbox.Objects[1].(*widget.Button)
+			deleteBtn := hbox.Objects[2].(*widget.Button)
+
+			label.SetText(setting.Description)
+
+			loadBtn.OnTapped = func() {
+				hg.loadSetting(key)
+			}
+
+			deleteBtn.OnTapped = func() {
+				hg.deleteSetting(key)
+			}
+		},
+	)
 }
 
 func (hg *HashGenerator) createUI() fyne.CanvasObject {
-	// Create form elements with labels
+	// Create main form elements with labels
 	form := container.NewVBox(
 		widget.NewLabel("Description Token:"),
 		hg.descriptionEntry,
@@ -101,7 +162,19 @@ func (hg *HashGenerator) createUI() fyne.CanvasObject {
 		hg.outputEntry,
 	)
 
-	return form
+	// Create side panel for saved settings
+	sidePanel := container.NewVBox(
+		widget.NewLabel("Saved Settings:"),
+		widget.NewSeparator(),
+		container.NewScroll(hg.settingsList),
+	)
+	sidePanel.Resize(fyne.NewSize(250, 0))
+
+	// Create horizontal split with main form and settings panel
+	content := container.NewHSplit(form, sidePanel)
+	content.SetOffset(0.7) // Make form take up 70% of width
+
+	return content
 }
 
 func (hg *HashGenerator) generateHash() {
@@ -112,6 +185,9 @@ func (hg *HashGenerator) generateHash() {
 		dialog.ShowError(fmt.Errorf("both description and master password tokens are required"), hg.window)
 		return
 	}
+
+	// Save current settings (but not master password or output)
+	hg.saveSetting(description)
 
 	// Combine the tokens
 	combined := description + masterPass
@@ -214,49 +290,73 @@ func (hg *HashGenerator) hashToNumbers(hash string) string {
 	return result
 }
 
-func (hg *HashGenerator) hashToUppercase(hash string) string {
-	result := ""
-	for _, char := range hash {
-		if char >= 'a' && char <= 'z' {
-			result += strings.ToUpper(string(char))
-		} else if char >= 'A' && char <= 'Z' {
-			result += string(char)
-		} else {
-			// Convert other characters to letters
-			result += string('A' + (char % 26))
-		}
+// Settings persistence functions
+func (hg *HashGenerator) saveSetting(description string) {
+	if description == "" {
+		return
 	}
-	return result
+
+	setting := SavedSetting{
+		Description:      description,
+		Algorithm:        hg.algorithmSelect.Selected,
+		CharRestrictions: hg.charRestSelect.Selected,
+		Length:           hg.lengthSelect.Selected,
+	}
+
+	hg.savedSettings[description] = setting
+	hg.saveSettingsToFile()
+	hg.settingsList.Refresh()
 }
 
-func (hg *HashGenerator) hashToLowercase(hash string) string {
-	result := ""
-	for _, char := range hash {
-		if char >= 'a' && char <= 'z' {
-			result += string(char)
-		} else if char >= 'A' && char <= 'Z' {
-			result += strings.ToLower(string(char))
-		} else {
-			// Convert other characters to letters
-			result += string('a' + (char % 26))
-		}
+func (hg *HashGenerator) loadSetting(key string) {
+	setting, exists := hg.savedSettings[key]
+	if !exists {
+		return
 	}
-	return result
+
+	hg.descriptionEntry.SetText(setting.Description)
+	hg.algorithmSelect.SetSelected(setting.Algorithm)
+	hg.charRestSelect.SetSelected(setting.CharRestrictions)
+	hg.lengthSelect.SetSelected(setting.Length)
 }
 
-func (hg *HashGenerator) toggleMask(bool) {
-	if hg.maskCheck.Checked {
-		// Mask the output with dots
-		text := hg.outputEntry.Text
-		if text != "" {
-			masked := strings.Repeat("•", len(text))
-			hg.outputEntry.SetText(masked)
-		}
-	} else {
-		// If we need to unmask, we need to regenerate since we've lost the original
-		// This is a limitation - in a real app you'd store the original separately
-		if hg.outputEntry.Text != "" && strings.Contains(hg.outputEntry.Text, "•") {
-			dialog.ShowInformation("Info", "Please regenerate to see unmasked output", hg.window)
-		}
+func (hg *HashGenerator) deleteSetting(key string) {
+	dialog.ShowConfirm("Delete Setting",
+		fmt.Sprintf("Are you sure you want to delete the setting for '%s'?", key),
+		func(confirmed bool) {
+			if confirmed {
+				delete(hg.savedSettings, key)
+				hg.saveSettingsToFile()
+				hg.settingsList.Refresh()
+			}
+		}, hg.window)
+}
+
+func (hg *HashGenerator) getSettingsKeys() []string {
+	keys := make([]string, 0, len(hg.savedSettings))
+	for key := range hg.savedSettings {
+		keys = append(keys, key)
 	}
+	return keys
+}
+
+func (hg *HashGenerator) saveSettingsToFile() error {
+	data, err := json.MarshalIndent(hg.savedSettings, "", "  ")
+	if err != nil {
+		return err
+	}
+	return ioutil.WriteFile(hg.settingsFile, data, 0644)
+}
+
+func (hg *HashGenerator) loadSettings() error {
+	if _, err := os.Stat(hg.settingsFile); os.IsNotExist(err) {
+		return nil // File doesn't exist yet, that's OK
+	}
+
+	data, err := ioutil.ReadFile(hg.settingsFile)
+	if err != nil {
+		return err
+	}
+
+	return json.Unmarshal(data, &hg.savedSettings)
 }
