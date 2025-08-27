@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -338,6 +339,8 @@ func (hg *HashGenerator) saveSetting(description string) {
 
 	hg.savedSettings[description] = setting
 	hg.saveSettingsToFile()
+
+	// Refresh the list to show the updated/new setting
 	hg.settingsList.Refresh()
 }
 
@@ -371,6 +374,7 @@ func (hg *HashGenerator) getSettingsKeys() []string {
 	for key := range hg.savedSettings {
 		keys = append(keys, key)
 	}
+	sort.Strings(keys) // Sort alphabetically
 	return keys
 }
 
