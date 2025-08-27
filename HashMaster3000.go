@@ -23,6 +23,7 @@ type SavedSetting struct {
 	Algorithm        string `json:"algorithm"`
 	CharRestrictions string `json:"char_restrictions"`
 	Length           string `json:"length"`
+	Iterations       string `json:"iterations"`
 }
 
 type HashGenerator struct {
@@ -31,6 +32,7 @@ type HashGenerator struct {
 	algorithmSelect  *widget.Select
 	charRestSelect   *widget.Select
 	lengthSelect     *widget.Select
+	iterationsSelect *widget.Select
 	outputEntry      *widget.Entry
 	maskCheck        *widget.Check
 	window           fyne.Window
@@ -100,6 +102,11 @@ func (hg *HashGenerator) setupUI() {
 	hg.lengthSelect = widget.NewSelect(lengthOptions, nil)
 	hg.lengthSelect.SetSelected("12")
 
+	// Hash iterations selection
+	iterationOptions := []string{"1", "2", "3", "5", "10", "100", "1000", "10000"}
+	hg.iterationsSelect = widget.NewSelect(iterationOptions, nil)
+	hg.iterationsSelect.SetSelected("1")
+
 	// Output entry
 	hg.outputEntry = widget.NewPasswordEntry()
 	hg.outputEntry.SetPlaceHolder("Generated hash will appear here...")
@@ -110,10 +117,12 @@ func (hg *HashGenerator) setupUI() {
 			return len(hg.savedSettings)
 		},
 		func() fyne.CanvasObject {
-			return container.NewHBox(
+			return container.NewBorder(nil, nil, nil,
+				container.NewHBox(
+					widget.NewButton("Load", nil),
+					widget.NewButton("Delete", nil),
+				),
 				widget.NewLabel("Setting"),
-				widget.NewButton("Load", nil),
-				widget.NewButton("Delete", nil),
 			)
 		},
 		func(id widget.ListItemID, obj fyne.CanvasObject) {
@@ -124,10 +133,11 @@ func (hg *HashGenerator) setupUI() {
 			key := keys[id]
 			setting := hg.savedSettings[key]
 
-			hbox := obj.(*container.HBox)
-			label := hbox.Objects[0].(*widget.Label)
-			loadBtn := hbox.Objects[1].(*widget.Button)
-			deleteBtn := hbox.Objects[2].(*widget.Button)
+			border := obj.(*container.Border)
+			label := border.Objects[0].(*widget.Label)
+			buttonBox := border.Objects[1].(*container.HBox)
+			loadBtn := buttonBox.Objects[0].(*widget.Button)
+			deleteBtn := buttonBox.Objects[1].(*widget.Button)
 
 			label.SetText(setting.Description)
 
@@ -155,6 +165,8 @@ func (hg *HashGenerator) createUI() fyne.CanvasObject {
 		hg.charRestSelect,
 		widget.NewLabel("Length Truncation:"),
 		hg.lengthSelect,
+		widget.NewLabel("Hash Iterations:"),
+		hg.iterationsSelect,
 		widget.NewSeparator(),
 		widget.NewButton("Generate", hg.generateHash),
 		widget.NewSeparator(),
@@ -192,8 +204,8 @@ func (hg *HashGenerator) generateHash() {
 	// Combine the tokens
 	combined := description + masterPass
 
-	// Get the hash using system commands
-	hash, err := hg.getHash(combined, hg.algorithmSelect.Selected)
+	// Get the hash using system commands with iterations
+	hash, err := hg.getHashWithIterations(combined, hg.algorithmSelect.Selected, hg.iterationsSelect.Selected)
 	if err != nil {
 		dialog.ShowError(fmt.Errorf("hashing failed: %v", err), hg.window)
 		return
@@ -216,6 +228,22 @@ func (hg *HashGenerator) generateHash() {
 
 	// Show success message
 	//dialog.ShowInformation("Success", "Hash generated and copied to clipboard!", hg.window)
+}
+
+func (hg *HashGenerator) getHashWithIterations(input, algorithm, iterations string) (string, error) {
+	iterCount, err := strconv.Atoi(iterations)
+	if err != nil {
+		return "", fmt.Errorf("invalid iteration count: %s", iterations)
+	}
+
+	result := input
+	for i := 0; i < iterCount; i++ {
+		result, err = hg.getHash(result, algorithm)
+		if err != nil {
+			return "", fmt.Errorf("iteration %d failed: %v", i+1, err)
+		}
+	}
+	return result, nil
 }
 
 func (hg *HashGenerator) getHash(input, algorithm string) (string, error) {
@@ -301,6 +329,7 @@ func (hg *HashGenerator) saveSetting(description string) {
 		Algorithm:        hg.algorithmSelect.Selected,
 		CharRestrictions: hg.charRestSelect.Selected,
 		Length:           hg.lengthSelect.Selected,
+		Iterations:       hg.iterationsSelect.Selected,
 	}
 
 	hg.savedSettings[description] = setting
@@ -318,6 +347,7 @@ func (hg *HashGenerator) loadSetting(key string) {
 	hg.algorithmSelect.SetSelected(setting.Algorithm)
 	hg.charRestSelect.SetSelected(setting.CharRestrictions)
 	hg.lengthSelect.SetSelected(setting.Length)
+	hg.iterationsSelect.SetSelected(setting.Iterations)
 }
 
 func (hg *HashGenerator) deleteSetting(key string) {
