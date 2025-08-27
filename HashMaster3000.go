@@ -1,15 +1,19 @@
 package main
 
 import (
+	"crypto/md5"
+	"crypto/sha1"
+	"crypto/sha256"
+	"crypto/sha512"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"hash"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
-	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -31,8 +35,8 @@ type HashGenerator struct {
 	masterPassEntry  *widget.Entry
 	algorithmSelect  *widget.Select
 	charRestSelect   *widget.Select
-	lengthSelect     *widget.Select
-	iterationsSelect *widget.Select
+	lengthEntry      *widget.Entry
+	iterationsEntry  *widget.Entry
 	outputEntry      *widget.Entry
 	app              fyne.App
 	window           fyne.Window
@@ -95,18 +99,15 @@ func (hg *HashGenerator) setupUI() {
 	}, nil)
 	hg.charRestSelect.SetSelected("Alphanumeric (replace others with underscore)")
 
-	// Length selection
-	lengthOptions := make([]string, 0)
-	for i := 8; i <= 128; i += 4 {
-		lengthOptions = append(lengthOptions, strconv.Itoa(i))
-	}
-	hg.lengthSelect = widget.NewSelect(lengthOptions, nil)
-	hg.lengthSelect.SetSelected("12")
+	// Length entry
+	hg.lengthEntry = widget.NewEntry()
+	hg.lengthEntry.SetPlaceHolder("Enter desired length (e.g. 12)")
+	hg.lengthEntry.SetText("12")
 
-	// Hash iterations selection
-	iterationOptions := []string{"1", "2", "3", "5", "10", "100", "1000", "10000"}
-	hg.iterationsSelect = widget.NewSelect(iterationOptions, nil)
-	hg.iterationsSelect.SetSelected("1")
+	// Iterations entry
+	hg.iterationsEntry = widget.NewEntry()
+	hg.iterationsEntry.SetPlaceHolder("Enter number of iterations (e.g. 1)")
+	hg.iterationsEntry.SetText("1")
 
 	// Output entry
 	hg.outputEntry = widget.NewPasswordEntry()
@@ -165,9 +166,9 @@ func (hg *HashGenerator) createUI() fyne.CanvasObject {
 		widget.NewLabel("Character Restrictions:"),
 		hg.charRestSelect,
 		widget.NewLabel("Length Truncation:"),
-		hg.lengthSelect,
+		hg.lengthEntry,
 		widget.NewLabel("Hash Iterations:"),
-		hg.iterationsSelect,
+		hg.iterationsEntry,
 		widget.NewSeparator(),
 		widget.NewButton("Generate", hg.generateHash),
 		widget.NewSeparator(),
@@ -189,8 +190,8 @@ func (hg *HashGenerator) createUI() fyne.CanvasObject {
 	)
 
 	// Create horizontal split with main form and settings panel
-	content := container.NewHSplit(form, sidePanel)
-	content.SetOffset(0.7) // Make form take up 70% of width
+	content := container.NewHSplit(sidePanel, form)
+	content.SetOffset(0.5) // Make form take up 70% of width
 
 	return content
 }
@@ -211,7 +212,7 @@ func (hg *HashGenerator) generateHash() {
 	combined := description + masterPass
 
 	// Get the hash using system commands with iterations
-	hash, err := hg.getHashWithIterations(combined, hg.algorithmSelect.Selected, hg.iterationsSelect.Selected)
+	hash, err := hg.getHashWithIterations(combined, hg.algorithmSelect.Selected, hg.iterationsEntry.Text)
 	if err != nil {
 		dialog.ShowError(fmt.Errorf("hashing failed: %v", err), hg.window)
 		return
@@ -221,7 +222,7 @@ func (hg *HashGenerator) generateHash() {
 	processed := hg.applyCharacterRestrictions(hash, hg.charRestSelect.Selected)
 
 	// Apply length restriction
-	length, _ := strconv.Atoi(hg.lengthSelect.Selected)
+	length, _ := strconv.Atoi(hg.lengthEntry.Text)
 	if len(processed) > length {
 		processed = processed[:length]
 	}
@@ -236,48 +237,49 @@ func (hg *HashGenerator) generateHash() {
 	//dialog.ShowInformation("Success", "Hash generated and copied to clipboard!", hg.window)
 }
 
-func (hg *HashGenerator) getHashWithIterations(input, algorithm, iterations string) (string, error) {
+func (hg *HashGenerator) getHashWithIterations(input string, algorithm string, iterations string) (string, error) {
 	iterCount, err := strconv.Atoi(iterations)
-	if err != nil {
+	if err != nil || iterCount < 1 {
 		return "", fmt.Errorf("invalid iteration count: %s", iterations)
 	}
 
-	result := input
+	result := []byte(input)
 	for i := 0; i < iterCount; i++ {
 		result, err = hg.getHash(result, algorithm)
 		if err != nil {
 			return "", fmt.Errorf("iteration %d failed: %v", i+1, err)
 		}
 	}
-	return result, nil
+
+	return base64.StdEncoding.EncodeToString(result), nil
 }
 
-func (hg *HashGenerator) getHash(input, algorithm string) (string, error) {
-	var cmd *exec.Cmd
+func (hg *HashGenerator) getHash(input []byte, algorithm string) ([]byte, error) {
+	var h hash.Hash
 
 	switch algorithm {
 	case "SHA-256":
-		cmd = exec.Command("sh", "-c", fmt.Sprintf("echo -n '%s' | sha256sum | xxd -r -p | base64", input))
+		h = sha256.New()
 	case "SHA-512":
-		cmd = exec.Command("sh", "-c", fmt.Sprintf("echo -n '%s' | sha512sum | xxd -r -p | base64", input))
+		h = sha512.New()
 	case "SHA-1":
-		cmd = exec.Command("sh", "-c", fmt.Sprintf("echo -n '%s' | sha1sum | xxd -r -p | base64", input))
+		h = sha1.New()
 	case "MD5":
-		cmd = exec.Command("sh", "-c", fmt.Sprintf("echo -n '%s' | md5sum | xxd -r -p | base64", input))
+		h = md5.New()
 	case "SHA-224":
-		cmd = exec.Command("sh", "-c", fmt.Sprintf("echo -n '%s' | sha224sum | xxd -r -p | base64", input))
+		h = sha256.New224()
 	case "SHA-384":
-		cmd = exec.Command("sh", "-c", fmt.Sprintf("echo -n '%s' | sha384sum | xxd -r -p | base64", input))
+		h = sha512.New384()
 	default:
-		return "", fmt.Errorf("unsupported algorithm: %s", algorithm)
+		return nil, fmt.Errorf("unsupported algorithm: %s", algorithm)
 	}
 
-	output, err := cmd.Output()
+	_, err := h.Write(input)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	return strings.TrimSpace(string(output)), nil
+	return h.Sum(nil), nil
 }
 
 func (hg *HashGenerator) applyCharacterRestrictions(hash, restriction string) string {
@@ -312,8 +314,8 @@ func (hg *HashGenerator) saveSetting(description string) {
 		Description:      description,
 		Algorithm:        hg.algorithmSelect.Selected,
 		CharRestrictions: hg.charRestSelect.Selected,
-		Length:           hg.lengthSelect.Selected,
-		Iterations:       hg.iterationsSelect.Selected,
+		Length:           hg.lengthEntry.Text,
+		Iterations:       hg.iterationsEntry.Text,
 	}
 
 	hg.savedSettings[description] = setting
@@ -332,8 +334,8 @@ func (hg *HashGenerator) loadSetting(key string) {
 	hg.descriptionEntry.SetText(setting.Description)
 	hg.algorithmSelect.SetSelected(setting.Algorithm)
 	hg.charRestSelect.SetSelected(setting.CharRestrictions)
-	hg.lengthSelect.SetSelected(setting.Length)
-	hg.iterationsSelect.SetSelected(setting.Iterations)
+	hg.lengthEntry.SetText(setting.Length)
+	hg.iterationsEntry.SetText(setting.Iterations)
 }
 
 func (hg *HashGenerator) deleteSetting(key string) {
