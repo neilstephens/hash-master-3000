@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -43,6 +44,8 @@ type HashGenerator struct {
 	savedSettings    map[string]SavedSetting
 	settingsList     *widget.List
 	settingsFile     string
+	filterEntry      *widget.Entry
+	filteredKeys     []string
 }
 
 func main() {
@@ -60,6 +63,7 @@ func main() {
 		window:        myWindow,
 		savedSettings: make(map[string]SavedSetting),
 		settingsFile:  settingsFile,
+		filteredKeys:  []string{},
 	}
 
 	generator.loadSettings()
@@ -77,6 +81,10 @@ func (hg *HashGenerator) setupUI() {
 	// Master password entry
 	hg.masterPassEntry = widget.NewPasswordEntry()
 	hg.masterPassEntry.SetPlaceHolder("Enter master password token...")
+	// Pressing Return will trigger the same action as "Generate"
+	hg.masterPassEntry.OnSubmitted = func(_ string) {
+		hg.generateHash()
+	}
 
 	// Algorithm selection
 	hg.algorithmSelect = widget.NewSelect([]string{
@@ -112,46 +120,55 @@ func (hg *HashGenerator) setupUI() {
 	// Output entry
 	hg.outputEntry = widget.NewPasswordEntry()
 	hg.outputEntry.SetPlaceHolder("Generated hash will appear here...")
+	hg.outputEntry.TextStyle = fyne.TextStyle{Monospace: true}
+
+	// Filter entry for settings
+	hg.filterEntry = widget.NewEntry()
+	hg.filterEntry.SetPlaceHolder("Filter settings...")
+	hg.filterEntry.OnChanged = func(text string) {
+		hg.filterSettings(text)
+	}
+
+	// Initialize filtered keys
+	hg.updateFilteredKeys("")
 
 	// Settings list
 	hg.settingsList = widget.NewList(
 		func() int {
-			return len(hg.savedSettings)
+			return len(hg.filteredKeys)
 		},
 		func() fyne.CanvasObject {
 			return container.NewBorder(nil, nil, nil,
-				container.NewHBox(
-					widget.NewButton("Load", nil),
-					widget.NewButton("Delete", nil),
-				),
+				widget.NewButton("Delete", nil),
 				widget.NewLabel("Setting"),
 			)
 		},
 		func(id widget.ListItemID, obj fyne.CanvasObject) {
-			keys := hg.getSettingsKeys()
-			if id >= len(keys) {
+			if id >= len(hg.filteredKeys) {
 				return
 			}
-			key := keys[id]
+			key := hg.filteredKeys[id]
 			setting := hg.savedSettings[key]
 
 			border := obj.(*fyne.Container)
 			label := border.Objects[0].(*widget.Label)
-			buttons := border.Objects[1].(*fyne.Container)
-			loadBtn := buttons.Objects[0].(*widget.Button)
-			deleteBtn := buttons.Objects[1].(*widget.Button)
+			deleteBtn := border.Objects[1].(*widget.Button)
 
 			label.SetText(setting.Description)
-
-			loadBtn.OnTapped = func() {
-				hg.loadSetting(key)
-			}
 
 			deleteBtn.OnTapped = func() {
 				hg.deleteSetting(key)
 			}
 		},
 	)
+
+	// Load setting when item is selected
+	hg.settingsList.OnSelected = func(id widget.ListItemID) {
+		if id >= 0 && id < len(hg.filteredKeys) {
+			key := hg.filteredKeys[id]
+			hg.loadSetting(key)
+		}
+	}
 }
 
 func (hg *HashGenerator) createUI() fyne.CanvasObject {
@@ -183,6 +200,7 @@ func (hg *HashGenerator) createUI() fyne.CanvasObject {
 	sidePanel := container.NewBorder(
 		container.NewVBox(
 			widget.NewLabel("Saved Settings:"),
+			hg.filterEntry,
 			widget.NewSeparator(),
 		),
 		nil, nil, nil,
@@ -194,6 +212,24 @@ func (hg *HashGenerator) createUI() fyne.CanvasObject {
 	content.SetOffset(0.5) // Make form take up 70% of width
 
 	return content
+}
+
+func (hg *HashGenerator) filterSettings(filterText string) {
+	hg.updateFilteredKeys(filterText)
+	hg.settingsList.Refresh()
+}
+
+func (hg *HashGenerator) updateFilteredKeys(filterText string) {
+	allKeys := hg.getSettingsKeys()
+	hg.filteredKeys = []string{}
+
+	filterLower := strings.ToLower(filterText)
+
+	for _, key := range allKeys {
+		if filterText == "" || strings.Contains(strings.ToLower(key), filterLower) {
+			hg.filteredKeys = append(hg.filteredKeys, key)
+		}
+	}
 }
 
 func (hg *HashGenerator) generateHash() {
@@ -321,7 +357,8 @@ func (hg *HashGenerator) saveSetting(description string) {
 	hg.savedSettings[description] = setting
 	hg.saveSettingsToFile()
 
-	// Refresh the list to show the updated/new setting
+	// Update filtered keys and refresh the list
+	hg.updateFilteredKeys(hg.filterEntry.Text)
 	hg.settingsList.Refresh()
 }
 
@@ -345,6 +382,7 @@ func (hg *HashGenerator) deleteSetting(key string) {
 			if confirmed {
 				delete(hg.savedSettings, key)
 				hg.saveSettingsToFile()
+				hg.updateFilteredKeys(hg.filterEntry.Text)
 				hg.settingsList.Refresh()
 			}
 		}, hg.window)
