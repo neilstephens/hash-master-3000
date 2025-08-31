@@ -1,5 +1,7 @@
 package main
 
+//TODO: check box to hide/unhide zero iteration entries
+
 import (
 	"crypto/md5"
 	"crypto/sha1"
@@ -54,6 +56,9 @@ func main() {
 	myApp.SetIcon(nil)
 	myWindow := myApp.NewWindow("Hash Master 3000")
 	myWindow.Resize(fyne.NewSize(400, 700))
+	myWindow.SetCloseIntercept(func() {
+		myApp.Quit()
+	})
 
 	generator := &HashGenerator{
 		app:           myApp,
@@ -481,5 +486,5 @@ func (hg *HashGenerator) readSettingsFromFile(reader fyne.URIReadCloser) {
 		errDialog.Show()
 		return
 	}
-	hg.updateFilteredKeys("")
+	hg.filterSettings(hg.filterEntry.Text)
 }
