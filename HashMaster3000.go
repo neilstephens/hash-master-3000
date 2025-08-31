@@ -50,7 +50,7 @@ type HashGenerator struct {
 }
 
 func main() {
-	myApp := app.New()
+	myApp := app.NewWithID("com.hashmaster3000.app")
 	myApp.SetIcon(nil)
 	myWindow := myApp.NewWindow("Hash Master 3000")
 	myWindow.Resize(fyne.NewSize(400, 700))
@@ -62,9 +62,10 @@ func main() {
 		filteredKeys:  []string{},
 	}
 
-	generator.loadSettings()
-	generator.setupUI()
+	appLife := myApp.Lifecycle()
+	appLife.SetOnStarted(generator.loadSettings)
 
+	generator.setupUI()
 	myWindow.SetContent(generator.createUI())
 	myWindow.ShowAndRun()
 }
@@ -407,44 +408,78 @@ func (hg *HashGenerator) saveSettingsToFile() error {
 	return err
 }
 
-func (hg *HashGenerator) loadSettings() error {
+func (hg *HashGenerator) loadSettings() {
 	//Check if we stored the URI of the settings file
 	// and if we can still access it, otherwise ask again
-	savedURI := hg.app.Preferences().StringWithFallback("settingsFileURI", "")
-	if savedURI == "" {
-		// Ask user to select or create a settings file
-		dialog.ShowFileOpen(func(reader fyne.URIReadCloser, err error) {
-			if err != nil || reader == nil {
-				dialog.ShowError(fmt.Errorf("no settings loaded"), hg.window)
-				return
-			}
-			// Save the URI for future use
-			hg.app.Preferences().SetString("settingsFileURI", reader.URI().String())
-			hg.settingsFile = reader.URI()
-			reader.Close()
-		}, hg.window)
-	} else {
-		var err error
-		hg.settingsFile, err = storage.ParseURI(savedURI)
-		if err != nil {
-			dialog.ShowError(fmt.Errorf("invalid settings file URI"), hg.window)
-			return err
-		}
+	savedURIstring := hg.app.Preferences().StringWithFallback("settingsFileURI", "")
+	if savedURIstring == "" {
+		hg.promptForURI()
+		return
 	}
 
-	readCloser, err := storage.Reader(hg.settingsFile)
+	var err error
+	hg.settingsFile, err = storage.ParseURI(savedURIstring)
 	if err != nil {
-		dialog.ShowError(fmt.Errorf("error opening URI"), hg.window)
-		return err
+		errDialog := dialog.NewError(fmt.Errorf("invalid settings file URI"), hg.window)
+		errDialog.SetOnClosed(func() {
+			hg.promptForURI()
+		})
+		errDialog.Show()
+		return
 	}
-	defer readCloser.Close()
+	reader, err := storage.Reader(hg.settingsFile)
+	if err != nil {
+		errDialog := dialog.NewError(fmt.Errorf("error opening URI"), hg.window)
+		errDialog.SetOnClosed(func() {
+			hg.promptForURI()
+		})
+		errDialog.Show()
+		return
+	}
+
+	hg.readSettingsFromFile(reader)
+}
+
+func (hg *HashGenerator) promptForURI() {
+	dialog.ShowFileOpen(func(reader fyne.URIReadCloser, err error) {
+		if err != nil || reader == nil {
+			errDialog := dialog.NewError(fmt.Errorf("file dialog error"), hg.window)
+			errDialog.SetOnClosed(func() {
+				hg.promptForURI()
+			})
+			errDialog.Show()
+			return
+		}
+		// Save the URI for future use
+		hg.app.Preferences().SetString("settingsFileURI", reader.URI().String())
+		hg.settingsFile = reader.URI()
+		hg.readSettingsFromFile(reader)
+	}, hg.window)
+}
+
+func (hg *HashGenerator) readSettingsFromFile(reader fyne.URIReadCloser) {
+
+	defer reader.Close()
 
 	// Read the file's contents
-	data, err := io.ReadAll(readCloser)
+	data, err := io.ReadAll(reader)
 	if err != nil {
-		dialog.ShowError(fmt.Errorf("error reading URI"), hg.window)
-		return err
+		errDialog := dialog.NewError(fmt.Errorf("error reading URI"), hg.window)
+		errDialog.SetOnClosed(func() {
+			hg.promptForURI()
+		})
+		errDialog.Show()
+		return
 	}
 
-	return json.Unmarshal(data, &hg.savedSettings)
+	err = json.Unmarshal(data, &hg.savedSettings)
+	if err != nil {
+		errDialog := dialog.NewError(fmt.Errorf("error parsing settings file"), hg.window)
+		errDialog.SetOnClosed(func() {
+			hg.promptForURI()
+		})
+		errDialog.Show()
+		return
+	}
+	hg.updateFilteredKeys("")
 }
