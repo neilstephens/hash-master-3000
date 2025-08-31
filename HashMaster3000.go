@@ -9,8 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash"
-	"os"
-	"path/filepath"
+	"io"
 	"regexp"
 	"sort"
 	"strconv"
@@ -20,6 +19,7 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -38,12 +38,13 @@ type HashGenerator struct {
 	charRestSelect   *widget.Select
 	lengthEntry      *widget.Entry
 	iterationsEntry  *widget.Entry
+	genButton        *widget.Button
 	outputEntry      *widget.Entry
 	app              fyne.App
 	window           fyne.Window
 	savedSettings    map[string]SavedSetting
 	settingsList     *widget.List
-	settingsFile     string
+	settingsFile     fyne.URI
 	filterEntry      *widget.Entry
 	filteredKeys     []string
 }
@@ -52,17 +53,12 @@ func main() {
 	myApp := app.New()
 	myApp.SetIcon(nil)
 	myWindow := myApp.NewWindow("Hash Master 3000")
-	myWindow.Resize(fyne.NewSize(800, 600))
-
-	// Get settings file path
-	homeDir, _ := os.UserHomeDir()
-	settingsFile := filepath.Join(homeDir, ".hashmaster_settings.json")
+	myWindow.Resize(fyne.NewSize(400, 700))
 
 	generator := &HashGenerator{
 		app:           myApp,
 		window:        myWindow,
 		savedSettings: make(map[string]SavedSetting),
-		settingsFile:  settingsFile,
 		filteredKeys:  []string{},
 	}
 
@@ -117,9 +113,13 @@ func (hg *HashGenerator) setupUI() {
 	hg.iterationsEntry.SetPlaceHolder("Enter number of iterations (e.g. 1)")
 	hg.iterationsEntry.SetText("1")
 
+	// Generate button
+	hg.genButton = widget.NewButton("Generate", hg.generateHash)
+	hg.genButton.Importance = widget.HighImportance
+
 	// Output entry
 	hg.outputEntry = widget.NewPasswordEntry()
-	hg.outputEntry.SetPlaceHolder("Generated hash will appear here...")
+	hg.outputEntry.SetPlaceHolder("Hash will appear here...")
 	hg.outputEntry.TextStyle = fyne.TextStyle{Monospace: true}
 
 	// Filter entry for settings
@@ -139,7 +139,7 @@ func (hg *HashGenerator) setupUI() {
 		},
 		func() fyne.CanvasObject {
 			return container.NewBorder(nil, nil, nil,
-				widget.NewButton("Delete", nil),
+				widget.NewButton("Del", nil),
 				widget.NewLabel("Setting"),
 			)
 		},
@@ -174,42 +174,30 @@ func (hg *HashGenerator) setupUI() {
 func (hg *HashGenerator) createUI() fyne.CanvasObject {
 	// Create main form elements with labels
 	form := container.NewVBox(
-		widget.NewLabel("Description Token:"),
-		hg.descriptionEntry,
-		widget.NewLabel("Master Password Token:"),
-		hg.masterPassEntry,
-		widget.NewLabel("Hashing Algorithm:"),
+		container.NewBorder(nil, nil, widget.NewLabel("Description:"), nil, hg.descriptionEntry),
+		container.NewBorder(nil, nil, widget.NewLabel("Master Pass:"), nil, hg.masterPassEntry),
 		hg.algorithmSelect,
-		widget.NewLabel("Character Restrictions:"),
 		hg.charRestSelect,
-		widget.NewLabel("Length Truncation:"),
-		hg.lengthEntry,
-		widget.NewLabel("Hash Iterations:"),
-		hg.iterationsEntry,
+		container.NewBorder(nil, nil, widget.NewLabel("Length:"), nil, hg.lengthEntry),
+		container.NewBorder(nil, nil, widget.NewLabel("Iterations:"), nil, hg.iterationsEntry),
 		widget.NewSeparator(),
-		widget.NewButton("Generate", hg.generateHash),
-		widget.NewSeparator(),
-		widget.NewLabel("Generated Output:"),
+		hg.genButton,
 		hg.outputEntry,
 	)
 
-	// Create side panel for saved settings
-	scrollContainer := container.NewScroll(hg.settingsList)
-	scrollContainer.SetMinSize(fyne.NewSize(250, 400))
-
-	sidePanel := container.NewBorder(
+	// Create panel for saved settings
+	settingsPanel := container.NewBorder(
 		container.NewVBox(
-			widget.NewLabel("Saved Settings:"),
-			hg.filterEntry,
 			widget.NewSeparator(),
+			widget.NewLabelWithStyle("Saved Settings", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+			hg.filterEntry,
 		),
 		nil, nil, nil,
-		scrollContainer,
+		container.NewScroll(hg.settingsList),
 	)
 
-	// Create horizontal split with main form and settings panel
-	content := container.NewHSplit(sidePanel, form)
-	content.SetOffset(0.5) // Make form take up 70% of width
+	// Create main border
+	content := container.NewBorder(form, nil, nil, nil, settingsPanel)
 
 	return content
 }
@@ -402,16 +390,59 @@ func (hg *HashGenerator) saveSettingsToFile() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(hg.settingsFile, data, 0644)
+
+	writeCloser, err := storage.Writer(hg.settingsFile)
+	if err != nil {
+		dialog.ShowError(fmt.Errorf("error opening URI for writing"), hg.window)
+		return err
+	}
+	defer writeCloser.Close()
+
+	_, err = writeCloser.Write(data)
+	if err != nil {
+		dialog.ShowError(fmt.Errorf("error writing to URI"), hg.window)
+		return err
+	}
+
+	return err
 }
 
 func (hg *HashGenerator) loadSettings() error {
-	if _, err := os.Stat(hg.settingsFile); os.IsNotExist(err) {
-		return nil // File doesn't exist yet, that's OK
+	//Check if we stored the URI of the settings file
+	// and if we can still access it, otherwise ask again
+	savedURI := hg.app.Preferences().StringWithFallback("settingsFileURI", "")
+	if savedURI == "" {
+		// Ask user to select or create a settings file
+		dialog.ShowFileOpen(func(reader fyne.URIReadCloser, err error) {
+			if err != nil || reader == nil {
+				dialog.ShowError(fmt.Errorf("no settings loaded"), hg.window)
+				return
+			}
+			// Save the URI for future use
+			hg.app.Preferences().SetString("settingsFileURI", reader.URI().String())
+			hg.settingsFile = reader.URI()
+			reader.Close()
+		}, hg.window)
+	} else {
+		var err error
+		hg.settingsFile, err = storage.ParseURI(savedURI)
+		if err != nil {
+			dialog.ShowError(fmt.Errorf("invalid settings file URI"), hg.window)
+			return err
+		}
 	}
 
-	data, err := os.ReadFile(hg.settingsFile)
+	readCloser, err := storage.Reader(hg.settingsFile)
 	if err != nil {
+		dialog.ShowError(fmt.Errorf("error opening URI"), hg.window)
+		return err
+	}
+	defer readCloser.Close()
+
+	// Read the file's contents
+	data, err := io.ReadAll(readCloser)
+	if err != nil {
+		dialog.ShowError(fmt.Errorf("error reading URI"), hg.window)
 		return err
 	}
 
