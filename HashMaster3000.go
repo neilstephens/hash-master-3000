@@ -611,7 +611,7 @@ func (hg *HashGenerator) recursiveMerge(importedSettings map[string]SavedSetting
 
 	// Conflict detected, show comparison dialog
 	// TODO: figure out how to add a third "Cancel Merge" option that aborts the entire merge process (set m.abortMerge = true and return)
-	dialog.ShowCustomConfirm("Resolve Conflict", "Overwrite", "Skip", hg.conflictContent(existingSetting, newSetting),
+	dialog.ShowCustomConfirm(key, "Overwrite", "Skip", hg.conflictContent(existingSetting, newSetting),
 		func(confirmed bool) {
 			if confirmed {
 				// Overwrite existing setting
@@ -624,19 +624,46 @@ func (hg *HashGenerator) recursiveMerge(importedSettings map[string]SavedSetting
 }
 
 func (hg *HashGenerator) conflictContent(existing, newSetting SavedSetting) fyne.CanvasObject {
-	//TODO: make this pretty, highlight differing fields, etc.
+
+	//a container for the matching fields (for context)
+	contextList := container.NewVBox()
+
+	// and a grid for the differing fields
+	diffList := container.NewVBox(container.NewGridWithColumns(3,
+		// Grid Headers
+		widget.NewLabelWithStyle("Conflict", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle("Existing", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle("Imported", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+	))
+
+	// A helper to compare and add to the appropriate container
+	addRow := func(label, existingVal, newVal string) {
+		if existingVal == newVal {
+			line := widget.NewLabel(fmt.Sprintf("%s%s", label, existingVal))
+			line.Wrapping = fyne.TextWrapBreak
+			contextList.Add(line)
+		} else {
+			comparisonGrid := container.NewGridWithColumns(3)
+			comparisonGrid.Add(widget.NewLabel(label))
+			existingWrap := widget.NewLabelWithStyle(existingVal, fyne.TextAlignLeading, fyne.TextStyle{})
+			existingWrap.Wrapping = fyne.TextWrapBreak
+			newWrap := widget.NewLabelWithStyle(newVal, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+			newWrap.Wrapping = fyne.TextWrapBreak
+			comparisonGrid.Add(existingWrap)
+			comparisonGrid.Add(newWrap)
+			diffList.Add(comparisonGrid)
+		}
+	}
+
+	// Add rows for each field. Algorithm and CharRestrictions don't need labels
+	addRow("", existing.Algorithm, newSetting.Algorithm)
+	addRow("", existing.CharRestrictions, newSetting.CharRestrictions)
+	addRow("Length: ", existing.Length, newSetting.Length)
+	addRow("Iterations: ", existing.Iterations, newSetting.Iterations)
+
 	return container.NewVBox(
-		widget.NewLabel("Conflict detected for setting: "+existing.Description),
-		widget.NewLabel("Existing Setting:"),
-		widget.NewLabel(fmt.Sprintf("Algorithm: %s", existing.Algorithm)),
-		widget.NewLabel(fmt.Sprintf("Char Restrictions: %s", existing.CharRestrictions)),
-		widget.NewLabel(fmt.Sprintf("Length: %s", existing.Length)),
-		widget.NewLabel(fmt.Sprintf("Iterations: %s", existing.Iterations)),
+		contextList,
 		widget.NewSeparator(),
-		widget.NewLabel("Imported Setting:"),
-		widget.NewLabel(fmt.Sprintf("Algorithm: %s", newSetting.Algorithm)),
-		widget.NewLabel(fmt.Sprintf("Char Restrictions: %s", newSetting.CharRestrictions)),
-		widget.NewLabel(fmt.Sprintf("Length: %s", newSetting.Length)),
-		widget.NewLabel(fmt.Sprintf("Iterations: %s", newSetting.Iterations)),
+		diffList,
 	)
 }
