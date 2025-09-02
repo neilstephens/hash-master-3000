@@ -1,7 +1,5 @@
 package main
 
-//TODO: store the last used filter and setting selection in preferences, and restore them on app start
-
 import (
 	"crypto/md5"
 	"crypto/sha1"
@@ -32,6 +30,16 @@ type SavedSetting struct {
 	Iterations       string `json:"iterations"`
 }
 
+type AppPreferences struct {
+	LastDescription string `json:"last_description"`
+	LastFilter      string `json:"last_filter"`
+	LastAlgorithm   string `json:"last_algorithm"`
+	LastCharRest    string `json:"last_char_rest"`
+	LastLength      string `json:"last_length"`
+	LastIter        string `json:"last_iterations"`
+	HideZeroIter    bool   `json:"hide_zero_iter"`
+}
+
 type HashGenerator struct {
 	descriptionEntry *widget.Entry
 	masterPassEntry  *widget.Entry
@@ -51,6 +59,7 @@ type HashGenerator struct {
 	mergeButton      *widget.Button
 	restoreButton    *widget.Button
 	hideZeroIterBox  *widget.Check
+	appPrefs         AppPreferences
 }
 
 type MergeState struct {
@@ -75,7 +84,9 @@ func main() {
 		window:        myWindow,
 		savedSettings: make(map[string]SavedSetting),
 		filteredKeys:  []string{},
+		appPrefs:      AppPreferences{}, // Initialize preferences
 	}
+	generator.loadAppPreferences()
 
 	appLife := myApp.Lifecycle()
 	appLife.SetOnStarted(generator.loadSettings)
@@ -90,6 +101,12 @@ func (hg *HashGenerator) setupUI() {
 	// Description token entry
 	hg.descriptionEntry = widget.NewEntry()
 	hg.descriptionEntry.SetPlaceHolder("Enter description token...")
+	hg.descriptionEntry.SetText(hg.appPrefs.LastDescription)
+	hg.descriptionEntry.OnChanged = func(text string) {
+		// Save preference when changed
+		hg.appPrefs.LastDescription = text
+		hg.saveAppPreferences()
+	}
 
 	// Master password entry
 	hg.masterPassEntry = widget.NewPasswordEntry()
@@ -107,8 +124,12 @@ func (hg *HashGenerator) setupUI() {
 		"MD5",
 		"SHA-224",
 		"SHA-384",
-	}, nil)
-	hg.algorithmSelect.SetSelected("SHA-256")
+	}, func(selected string) {
+		// Save preference when changed
+		hg.appPrefs.LastAlgorithm = selected
+		hg.saveAppPreferences()
+	})
+	hg.algorithmSelect.SetSelected(hg.appPrefs.LastAlgorithm)
 
 	// Character restriction selection
 	hg.charRestSelect = widget.NewSelect([]string{
@@ -117,18 +138,32 @@ func (hg *HashGenerator) setupUI() {
 		"Alphanumeric (omit others)",
 		"Alpha only",
 		"Numeric only",
-	}, nil)
-	hg.charRestSelect.SetSelected("Alphanumeric (replace others with underscore)")
+	}, func(selected string) {
+		// Save preference when changed
+		hg.appPrefs.LastCharRest = selected
+		hg.saveAppPreferences()
+	})
+	hg.charRestSelect.SetSelected(hg.appPrefs.LastCharRest)
 
 	// Length entry
 	hg.lengthEntry = widget.NewEntry()
 	hg.lengthEntry.SetPlaceHolder("Enter desired length (e.g. 12)")
-	hg.lengthEntry.SetText("12")
+	hg.lengthEntry.SetText(hg.appPrefs.LastLength)
+	hg.lengthEntry.OnChanged = func(text string) {
+		// Save preference when changed
+		hg.appPrefs.LastLength = text
+		hg.saveAppPreferences()
+	}
 
 	// Iterations entry
 	hg.iterationsEntry = widget.NewEntry()
 	hg.iterationsEntry.SetPlaceHolder("Enter number of iterations (e.g. 1)")
-	hg.iterationsEntry.SetText("1")
+	hg.iterationsEntry.SetText(hg.appPrefs.LastIter)
+	hg.iterationsEntry.OnChanged = func(text string) {
+		// Save preference when changed
+		hg.appPrefs.LastIter = text
+		hg.saveAppPreferences()
+	}
 
 	// Generate button
 	hg.genButton = widget.NewButton("Generate", hg.generateHash)
@@ -141,17 +176,13 @@ func (hg *HashGenerator) setupUI() {
 
 	// Filter entry for settings
 	hg.filterEntry = widget.NewEntry()
+	hg.filterEntry.SetText(hg.appPrefs.LastFilter)
 	hg.filterEntry.SetPlaceHolder("Filter settings...")
 	hg.filterEntry.OnChanged = func(text string) {
+		hg.appPrefs.LastFilter = text
+		hg.saveAppPreferences()
 		hg.filterSettings(text)
 	}
-
-	// Checkbox to hide/unhide zero iteration settings
-	hg.hideZeroIterBox = widget.NewCheck("Hide zero iteration settings", func(checked bool) {
-		hg.appPrefs.HideZeroIter = checked
-		hg.saveAppPreferences()
-		hg.filterSettings(hg.filterEntry.Text)
-	})
 
 	// Backup and Restore buttons
 	hg.backupButton = widget.NewButton("Backup", hg.backupSettings)
@@ -198,6 +229,14 @@ func (hg *HashGenerator) setupUI() {
 			hg.loadSetting(key)
 		}
 	}
+
+	// Checkbox to hide/unhide zero iteration settings (a way to mark "inactive" settings)
+	hg.hideZeroIterBox = widget.NewCheck("Hide Inactive", func(checked bool) {
+		hg.appPrefs.HideZeroIter = checked
+		hg.saveAppPreferences()
+		hg.filterSettings(hg.filterEntry.Text)
+	})
+	hg.hideZeroIterBox.SetChecked(hg.appPrefs.HideZeroIter)
 }
 
 func (hg *HashGenerator) createUI() fyne.CanvasObject {
@@ -225,9 +264,10 @@ func (hg *HashGenerator) createUI() fyne.CanvasObject {
 	settingsPanel := container.NewBorder(
 		container.NewVBox(
 			widget.NewSeparator(),
-			widget.NewLabelWithStyle("Saved Settings", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+			container.NewBorder(nil, nil, nil, hg.hideZeroIterBox,
+				widget.NewLabelWithStyle("Saved Settings", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+			),
 			hg.filterEntry,
-			hg.hideZeroIterBox, // Add the checkbox to hide zero iteration settings
 		),
 		backupRestoreContainer,
 		nil, nil,
@@ -444,8 +484,50 @@ func (hg *HashGenerator) saveSettingsToPreferences() {
 	hg.app.Preferences().SetString("savedSettings", string(data))
 }
 
+// Save app preferences (filter, last used settings, etc.)
+func (hg *HashGenerator) saveAppPreferences() {
+	data, err := json.Marshal(hg.appPrefs)
+	if err != nil {
+		dialog.ShowError(fmt.Errorf("error encoding app preferences: %v", err), hg.window)
+		return
+	}
+	hg.app.Preferences().SetString("appPreferences", string(data))
+}
+
+// Load app preferences and restore last used settings
+func (hg *HashGenerator) loadAppPreferences() {
+
+	prefsData := hg.app.Preferences().StringWithFallback("appPreferences", "")
+	if prefsData == "" {
+		// No saved preferences, use defaults
+		hg.appPrefs = hg.DefaultAppPrefs()
+		return
+	}
+
+	err := json.Unmarshal([]byte(prefsData), &hg.appPrefs)
+	if err != nil {
+		// Error parsing preferences, use defaults
+		hg.appPrefs = hg.DefaultAppPrefs()
+		return
+	}
+}
+
+func (hg *HashGenerator) DefaultAppPrefs() AppPreferences {
+	return AppPreferences{
+		LastDescription: "",
+		LastAlgorithm:   "SHA-256",
+		LastCharRest:    "Alphanumeric (replace others with underscore)",
+		LastLength:      "12",
+		LastIter:        "1",
+		HideZeroIter:    true,
+		LastFilter:      "",
+	}
+}
+
 // Load settings from Fyne preferences
 func (hg *HashGenerator) loadSettings() {
+
+	// Load saved settings
 	settingsData := hg.app.Preferences().StringWithFallback("savedSettings", "")
 	if settingsData == "" {
 		// No saved settings, start with empty map
