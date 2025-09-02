@@ -1,5 +1,7 @@
 package main
 
+//TODO: Work out how to make everything a bit bigger on Android (seems small compared to desktop)
+
 import (
 	"crypto/md5"
 	"crypto/sha1"
