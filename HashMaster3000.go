@@ -1,6 +1,5 @@
 package main
 
-//TODO: check box to hide/unhide zero iteration entries
 //TODO: store the last used filter and setting selection in preferences, and restore them on app start
 
 import (
@@ -51,6 +50,7 @@ type HashGenerator struct {
 	backupButton     *widget.Button
 	mergeButton      *widget.Button
 	restoreButton    *widget.Button
+	hideZeroIterBox  *widget.Check
 }
 
 type MergeState struct {
@@ -146,6 +146,13 @@ func (hg *HashGenerator) setupUI() {
 		hg.filterSettings(text)
 	}
 
+	// Checkbox to hide/unhide zero iteration settings
+	hg.hideZeroIterBox = widget.NewCheck("Hide zero iteration settings", func(checked bool) {
+		hg.appPrefs.HideZeroIter = checked
+		hg.saveAppPreferences()
+		hg.filterSettings(hg.filterEntry.Text)
+	})
+
 	// Backup and Restore buttons
 	hg.backupButton = widget.NewButton("Backup", hg.backupSettings)
 	hg.mergeButton = widget.NewButton("Merge", hg.mergeSettings)
@@ -220,6 +227,7 @@ func (hg *HashGenerator) createUI() fyne.CanvasObject {
 			widget.NewSeparator(),
 			widget.NewLabelWithStyle("Saved Settings", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
 			hg.filterEntry,
+			hg.hideZeroIterBox, // Add the checkbox to hide zero iteration settings
 		),
 		backupRestoreContainer,
 		nil, nil,
@@ -244,6 +252,17 @@ func (hg *HashGenerator) updateFilteredKeys(filterText string) {
 	filterLower := strings.ToLower(filterText)
 
 	for _, key := range allKeys {
+		setting := hg.savedSettings[key]
+
+		// Check if we should hide zero iteration settings
+		if hg.hideZeroIterBox.Checked {
+			iterations, err := strconv.Atoi(setting.Iterations)
+			if err == nil && iterations == 0 {
+				continue // Skip this setting if it has 0 iterations and we're hiding them
+			}
+		}
+
+		// Apply text filter
 		if filterText == "" || strings.Contains(strings.ToLower(key), filterLower) {
 			hg.filteredKeys = append(hg.filteredKeys, key)
 		}
