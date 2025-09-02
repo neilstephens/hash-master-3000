@@ -1,6 +1,7 @@
 package main
 
 //TODO: check box to hide/unhide zero iteration entries
+//TODO: store the last used filter and setting selection in preferences, and restore them on app start
 
 import (
 	"crypto/md5"
@@ -21,7 +22,6 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
-	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -46,9 +46,19 @@ type HashGenerator struct {
 	window           fyne.Window
 	savedSettings    map[string]SavedSetting
 	settingsList     *widget.List
-	settingsFile     fyne.URI
 	filterEntry      *widget.Entry
 	filteredKeys     []string
+	backupButton     *widget.Button
+	mergeButton      *widget.Button
+	restoreButton    *widget.Button
+}
+
+type MergeState struct {
+	mergedSettings map[string]SavedSetting
+	keys           []string
+	index          int
+	addedCount     int
+	abortMerge     bool
 }
 
 func main() {
@@ -72,6 +82,7 @@ func main() {
 
 	generator.setupUI()
 	myWindow.SetContent(generator.createUI())
+	myWindow.Canvas().Focus(generator.filterEntry)
 	myWindow.ShowAndRun()
 }
 
@@ -135,6 +146,11 @@ func (hg *HashGenerator) setupUI() {
 		hg.filterSettings(text)
 	}
 
+	// Backup and Restore buttons
+	hg.backupButton = widget.NewButton("Backup", hg.backupSettings)
+	hg.mergeButton = widget.NewButton("Merge", hg.mergeSettings)
+	hg.restoreButton = widget.NewButton("Restore", hg.restoreSettings)
+
 	// Initialize filtered keys
 	hg.updateFilteredKeys("")
 
@@ -191,6 +207,13 @@ func (hg *HashGenerator) createUI() fyne.CanvasObject {
 		hg.outputEntry,
 	)
 
+	// Create backup/restore buttons container
+	backupRestoreContainer := container.NewGridWithColumns(3,
+		hg.backupButton,
+		hg.mergeButton,
+		hg.restoreButton,
+	)
+
 	// Create panel for saved settings
 	settingsPanel := container.NewBorder(
 		container.NewVBox(
@@ -198,7 +221,8 @@ func (hg *HashGenerator) createUI() fyne.CanvasObject {
 			widget.NewLabelWithStyle("Saved Settings", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
 			hg.filterEntry,
 		),
-		nil, nil, nil,
+		backupRestoreContainer,
+		nil, nil,
 		container.NewScroll(hg.settingsList),
 	)
 
@@ -334,7 +358,7 @@ func (hg *HashGenerator) applyCharacterRestrictions(hash, restriction string) st
 	}
 }
 
-// Settings persistence functions
+// Settings persistence functions using Fyne preferences
 func (hg *HashGenerator) saveSetting(description string) {
 	if description == "" {
 		return
@@ -349,7 +373,7 @@ func (hg *HashGenerator) saveSetting(description string) {
 	}
 
 	hg.savedSettings[description] = setting
-	hg.saveSettingsToFile()
+	hg.saveSettingsToPreferences()
 
 	// Update filtered keys and refresh the list
 	hg.updateFilteredKeys(hg.filterEntry.Text)
@@ -375,7 +399,7 @@ func (hg *HashGenerator) deleteSetting(key string) {
 		func(confirmed bool) {
 			if confirmed {
 				delete(hg.savedSettings, key)
-				hg.saveSettingsToFile()
+				hg.saveSettingsToPreferences()
 				hg.updateFilteredKeys(hg.filterEntry.Text)
 				hg.settingsList.Refresh()
 			}
@@ -391,100 +415,228 @@ func (hg *HashGenerator) getSettingsKeys() []string {
 	return keys
 }
 
-func (hg *HashGenerator) saveSettingsToFile() error {
-	data, err := json.MarshalIndent(hg.savedSettings, "", "  ")
+// Save settings to Fyne preferences
+func (hg *HashGenerator) saveSettingsToPreferences() {
+	data, err := json.Marshal(hg.savedSettings)
 	if err != nil {
-		return err
+		dialog.ShowError(fmt.Errorf("error encoding settings: %v", err), hg.window)
+		return
 	}
-
-	writeCloser, err := storage.Writer(hg.settingsFile)
-	if err != nil {
-		dialog.ShowError(fmt.Errorf("error opening URI for writing"), hg.window)
-		return err
-	}
-	defer writeCloser.Close()
-
-	_, err = writeCloser.Write(data)
-	if err != nil {
-		dialog.ShowError(fmt.Errorf("error writing to URI"), hg.window)
-		return err
-	}
-
-	return err
+	hg.app.Preferences().SetString("savedSettings", string(data))
 }
 
+// Load settings from Fyne preferences
 func (hg *HashGenerator) loadSettings() {
-	//Check if we stored the URI of the settings file
-	// and if we can still access it, otherwise ask again
-	savedURIstring := hg.app.Preferences().StringWithFallback("settingsFileURI", "")
-	if savedURIstring == "" {
-		hg.promptForURI()
+	settingsData := hg.app.Preferences().StringWithFallback("savedSettings", "")
+	if settingsData == "" {
+		// No saved settings, start with empty map
+		hg.savedSettings = make(map[string]SavedSetting)
+		hg.filterSettings(hg.filterEntry.Text)
 		return
 	}
 
-	var err error
-	hg.settingsFile, err = storage.ParseURI(savedURIstring)
+	err := json.Unmarshal([]byte(settingsData), &hg.savedSettings)
 	if err != nil {
-		errDialog := dialog.NewError(fmt.Errorf("invalid settings file URI"), hg.window)
-		errDialog.SetOnClosed(func() {
-			hg.promptForURI()
-		})
-		errDialog.Show()
-		return
-	}
-	reader, err := storage.Reader(hg.settingsFile)
-	if err != nil {
-		errDialog := dialog.NewError(fmt.Errorf("error opening URI"), hg.window)
-		errDialog.SetOnClosed(func() {
-			hg.promptForURI()
-		})
-		errDialog.Show()
-		return
+		dialog.ShowError(fmt.Errorf("error parsing saved settings: %v", err), hg.window)
+		hg.savedSettings = make(map[string]SavedSetting)
 	}
 
-	hg.readSettingsFromFile(reader)
+	hg.filterSettings(hg.filterEntry.Text)
 }
 
-func (hg *HashGenerator) promptForURI() {
-	dialog.ShowFileOpen(func(reader fyne.URIReadCloser, err error) {
-		if err != nil || reader == nil {
-			errDialog := dialog.NewError(fmt.Errorf("file dialog error"), hg.window)
-			errDialog.SetOnClosed(func() {
-				hg.promptForURI()
-			})
-			errDialog.Show()
+// Backup settings to file
+func (hg *HashGenerator) backupSettings() {
+	if len(hg.savedSettings) == 0 {
+		dialog.ShowInformation("No Settings", "No settings to backup.", hg.window)
+		return
+	}
+
+	dialog.ShowFileSave(func(writer fyne.URIWriteCloser, err error) {
+		if err != nil || writer == nil {
+			if err != nil {
+				dialog.ShowError(fmt.Errorf("backup failed: %v", err), hg.window)
+			}
 			return
 		}
-		// Save the URI for future use
-		hg.app.Preferences().SetString("settingsFileURI", reader.URI().String())
-		hg.settingsFile = reader.URI()
-		hg.readSettingsFromFile(reader)
+		defer writer.Close()
+
+		data, err := json.MarshalIndent(hg.savedSettings, "", "  ")
+		if err != nil {
+			dialog.ShowError(fmt.Errorf("error encoding settings: %v", err), hg.window)
+			return
+		}
+
+		_, err = writer.Write(data)
+		if err != nil {
+			dialog.ShowError(fmt.Errorf("error writing backup file: %v", err), hg.window)
+			return
+		}
+
+		dialog.ShowInformation("Backup Complete", "Settings backed up successfully!", hg.window)
 	}, hg.window)
 }
 
-func (hg *HashGenerator) readSettingsFromFile(reader fyne.URIReadCloser) {
+// Restore settings from file
+func (hg *HashGenerator) restoreSettings() {
+	dialog.ShowFileOpen(func(reader fyne.URIReadCloser, err error) {
+		if err != nil || reader == nil {
+			if err != nil {
+				dialog.ShowError(fmt.Errorf("restore failed: %v", err), hg.window)
+			}
+			return
+		}
+		defer reader.Close()
 
-	defer reader.Close()
+		// Read the file's contents
+		data, err := io.ReadAll(reader)
+		if err != nil {
+			dialog.ShowError(fmt.Errorf("error reading backup file: %v", err), hg.window)
+			return
+		}
 
-	// Read the file's contents
-	data, err := io.ReadAll(reader)
-	if err != nil {
-		errDialog := dialog.NewError(fmt.Errorf("error reading URI"), hg.window)
-		errDialog.SetOnClosed(func() {
-			hg.promptForURI()
-		})
-		errDialog.Show()
+		// Parse the settings
+		var restoredSettings map[string]SavedSetting
+		err = json.Unmarshal(data, &restoredSettings)
+		if err != nil {
+			dialog.ShowError(fmt.Errorf("error parsing backup file: %v", err), hg.window)
+			return
+		}
+
+		// Confirm restore operation
+		dialog.ShowConfirm("Restore Settings",
+			fmt.Sprintf("This will replace your current %d settings with %d settings from the backup file. Continue?",
+				len(hg.savedSettings), len(restoredSettings)),
+			func(confirmed bool) {
+				if confirmed {
+					hg.savedSettings = restoredSettings
+					hg.saveSettingsToPreferences()
+					hg.updateFilteredKeys(hg.filterEntry.Text)
+					hg.settingsList.Refresh()
+					dialog.ShowInformation("Restore Complete",
+						fmt.Sprintf("Successfully restored %d settings!", len(restoredSettings)), hg.window)
+				}
+			}, hg.window)
+	}, hg.window)
+}
+
+// Merge settings from file
+func (hg *HashGenerator) mergeSettings() {
+	dialog.ShowFileOpen(func(reader fyne.URIReadCloser, err error) {
+		if err != nil || reader == nil {
+			if err != nil {
+				dialog.ShowError(fmt.Errorf("merge failed: %v", err), hg.window)
+			}
+			return
+		}
+		defer reader.Close()
+
+		// Read the file's contents
+		data, err := io.ReadAll(reader)
+		if err != nil {
+			dialog.ShowError(fmt.Errorf("error reading backup file: %v", err), hg.window)
+			return
+		}
+
+		// Parse the settings
+		var importedSettings map[string]SavedSetting
+		err = json.Unmarshal(data, &importedSettings)
+		if err != nil {
+			dialog.ShowError(fmt.Errorf("error parsing backup file: %v", err), hg.window)
+			return
+		}
+		hg.recursiveMerge(importedSettings, nil)
+	}, hg.window)
+}
+
+func (hg *HashGenerator) recursiveMerge(importedSettings map[string]SavedSetting, m *MergeState) {
+	if m == nil {
+		// Initialize merge state
+		m = &MergeState{
+			mergedSettings: make(map[string]SavedSetting),
+			keys:           make([]string, 0, len(importedSettings)),
+			index:          0,
+			addedCount:     0,
+			abortMerge:     false,
+		}
+		// Copy existing settings
+		for k, v := range hg.savedSettings {
+			m.mergedSettings[k] = v
+		}
+		// Prepare keys for iteration
+		for k := range importedSettings {
+			m.keys = append(m.keys, k)
+		}
+		sort.Strings(m.keys)
+	} else if m.index >= len(m.keys) {
+		if m.abortMerge {
+			dialog.ShowInformation("Merge Aborted",
+				"Merge operation was aborted by the user.", hg.window)
+			return
+		}
+		hg.savedSettings = m.mergedSettings
+		hg.saveSettingsToPreferences()
+		hg.updateFilteredKeys(hg.filterEntry.Text)
+		hg.settingsList.Refresh()
+		dialog.ShowInformation("Merge Complete",
+			fmt.Sprintf("Successfully merged %d new/changed settings!", m.addedCount), hg.window)
 		return
 	}
 
-	err = json.Unmarshal(data, &hg.savedSettings)
-	if err != nil {
-		errDialog := dialog.NewError(fmt.Errorf("error parsing settings file"), hg.window)
-		errDialog.SetOnClosed(func() {
-			hg.promptForURI()
-		})
-		errDialog.Show()
+	key := m.keys[m.index]
+	newSetting := importedSettings[key]
+	existingSetting, exists := m.mergedSettings[key]
+
+	// Merge settings
+	// - ignore duplicates (all fields must match)
+	// - add new unique settings
+	// - prompt if any conflicts (same description, different fields)
+	//   - show side-by-side comparison (highlight different fields), options "skip", "overwrite", "cancel merge"
+
+	if !exists {
+		// New unique setting, add it
+		m.mergedSettings[key] = newSetting
+		m.addedCount++
+		m.index++
+		hg.recursiveMerge(importedSettings, m)
 		return
 	}
-	hg.filterSettings(hg.filterEntry.Text)
+
+	// Check if all fields match
+	if existingSetting == newSetting {
+		// Duplicate, ignore
+		m.index++
+		hg.recursiveMerge(importedSettings, m)
+		return
+	}
+
+	// Conflict detected, show comparison dialog
+	// TODO: figure out how to add a third "Cancel Merge" option that aborts the entire merge process (set m.abortMerge = true and return)
+	dialog.ShowCustomConfirm("Resolve Conflict", "Overwrite", "Skip", hg.conflictContent(existingSetting, newSetting),
+		func(confirmed bool) {
+			if confirmed {
+				// Overwrite existing setting
+				m.mergedSettings[key] = newSetting
+				m.addedCount++
+			} // else skip
+			m.index++
+			hg.recursiveMerge(importedSettings, m)
+		}, hg.window)
+}
+
+func (hg *HashGenerator) conflictContent(existing, newSetting SavedSetting) fyne.CanvasObject {
+	//TODO: make this pretty, highlight differing fields, etc.
+	return container.NewVBox(
+		widget.NewLabel("Conflict detected for setting: "+existing.Description),
+		widget.NewLabel("Existing Setting:"),
+		widget.NewLabel(fmt.Sprintf("Algorithm: %s", existing.Algorithm)),
+		widget.NewLabel(fmt.Sprintf("Char Restrictions: %s", existing.CharRestrictions)),
+		widget.NewLabel(fmt.Sprintf("Length: %s", existing.Length)),
+		widget.NewLabel(fmt.Sprintf("Iterations: %s", existing.Iterations)),
+		widget.NewSeparator(),
+		widget.NewLabel("Imported Setting:"),
+		widget.NewLabel(fmt.Sprintf("Algorithm: %s", newSetting.Algorithm)),
+		widget.NewLabel(fmt.Sprintf("Char Restrictions: %s", newSetting.CharRestrictions)),
+		widget.NewLabel(fmt.Sprintf("Length: %s", newSetting.Length)),
+		widget.NewLabel(fmt.Sprintf("Iterations: %s", newSetting.Iterations)),
+	)
 }
