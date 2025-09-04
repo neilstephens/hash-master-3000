@@ -113,6 +113,7 @@ func (hg *HashGenerator) setupUI() {
 	// Master password entry
 	hg.masterPassEntry = widget.NewPasswordEntry()
 	hg.masterPassEntry.SetPlaceHolder("Enter master password token...")
+	hg.masterPassEntry.TextStyle = fyne.TextStyle{Monospace: true}
 	// Pressing Return will trigger the same action as "Generate"
 	hg.masterPassEntry.OnSubmitted = func(_ string) {
 		hg.generateHash()
@@ -337,8 +338,8 @@ func (hg *HashGenerator) generateHash() {
 	processed := hg.applyCharacterRestrictions(hash, hg.charRestSelect.Selected)
 
 	// Apply length restriction
-	length, _ := strconv.Atoi(hg.lengthEntry.Text)
-	if len(processed) > length {
+	length, err := strconv.Atoi(hg.lengthEntry.Text)
+	if err == nil && length > 0 && len(processed) > length {
 		processed = processed[:length]
 	}
 
