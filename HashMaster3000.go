@@ -774,9 +774,35 @@ func (hg *HashGenerator) recursiveMerge(importedSettings map[string]SavedSetting
 
 	// Conflict detected, show comparison dialog
 	// TODO: figure out how to add a third "Cancel Merge" option that aborts the entire merge process (set m.abortMerge = true and return)
-	dialog.ShowCustomConfirm(key, "Overwrite", "Skip", hg.conflictContent(existingSetting, newSetting),
+	var overwrite bool
+	var keepCheck *widget.Check
+	overwriteCheck := widget.NewCheck("", func(checked bool) {
+		overwrite = checked
+		keepCheck.SetChecked(!checked)
+	})
+	keepCheck = widget.NewCheck("", func(checked bool) {
+		overwrite = !checked
+		overwriteCheck.SetChecked(!checked)
+	})
+	keepCheck.SetChecked(true) // default to keep existing
+
+	dialogContent := container.NewVBox(
+		hg.conflictContent(existingSetting, newSetting),
+		container.NewGridWithColumns(3,
+			widget.NewLabelWithStyle("Choose:", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+			keepCheck,
+			overwriteCheck,
+		),
+	)
+
+	dialog.ShowCustomConfirm(key, "Continue", "Abort Merge", dialogContent,
 		func(confirmed bool) {
-			if confirmed {
+			if !confirmed {
+				m.abortMerge = true
+				return
+			}
+			// Apply user's choice
+			if overwrite {
 				// Overwrite existing setting
 				m.mergedSettings[key] = newSetting
 				m.addedCount++
