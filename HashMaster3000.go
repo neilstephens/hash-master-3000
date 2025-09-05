@@ -1,7 +1,5 @@
 package main
 
-//TODO: Work out how to make everything a bit bigger on Android (seems small compared to desktop)
-
 import (
 	"crypto/md5"
 	"crypto/sha1"
@@ -11,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash"
+	"image/color"
 	"io"
 	"regexp"
 	"sort"
@@ -21,8 +20,53 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
+
+// A custom theme that only overrides the text size, to make the output easier to read
+type hashTheme struct {
+	fyne.Theme
+	scale float32
+}
+
+func NewHashTheme(scale float32) fyne.Theme {
+	return &hashTheme{
+		Theme: theme.DefaultTheme(),
+		scale: scale,
+	}
+}
+
+func (t *hashTheme) Size(name fyne.ThemeSizeName) float32 {
+	baseSize := t.Theme.Size(name)
+
+	// Only multiply text-related sizes
+	switch name {
+	case theme.SizeNameText:
+		return baseSize * t.scale
+	case theme.SizeNameHeadingText:
+		return baseSize * t.scale
+	case theme.SizeNameSubHeadingText:
+		return baseSize * t.scale
+	case theme.SizeNameCaptionText:
+		return baseSize * t.scale
+	default:
+		// Return original size for non-text elements
+		return baseSize
+	}
+}
+
+func (t *hashTheme) Font(style fyne.TextStyle) fyne.Resource {
+	return t.Theme.Font(style)
+}
+
+func (t *hashTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
+	return t.Theme.Color(name, variant)
+}
+
+func (t *hashTheme) Icon(name fyne.ThemeIconName) fyne.Resource {
+	return t.Theme.Icon(name)
+}
 
 type SavedSetting struct {
 	Description      string `json:"description"`
@@ -40,6 +84,7 @@ type AppPreferences struct {
 	LastLength      string `json:"last_length"`
 	LastIter        string `json:"last_iterations"`
 	HideZeroIter    bool   `json:"hide_zero_iter"`
+	CopyToClipboard bool   `json:"copy_to_clipboard"`
 }
 
 type HashGenerator struct {
@@ -61,6 +106,7 @@ type HashGenerator struct {
 	mergeButton      *widget.Button
 	restoreButton    *widget.Button
 	hideZeroIterBox  *widget.Check
+	copyToClipboard  *widget.Check
 	appPrefs         AppPreferences
 }
 
@@ -102,7 +148,7 @@ func main() {
 func (hg *HashGenerator) setupUI() {
 	// Description token entry
 	hg.descriptionEntry = widget.NewEntry()
-	hg.descriptionEntry.SetPlaceHolder("Enter description token...")
+	hg.descriptionEntry.SetPlaceHolder("Enter description...")
 	hg.descriptionEntry.SetText(hg.appPrefs.LastDescription)
 	hg.descriptionEntry.OnChanged = func(text string) {
 		// Save preference when changed
@@ -112,7 +158,7 @@ func (hg *HashGenerator) setupUI() {
 
 	// Master password entry
 	hg.masterPassEntry = widget.NewPasswordEntry()
-	hg.masterPassEntry.SetPlaceHolder("Enter master password token...")
+	hg.masterPassEntry.SetPlaceHolder("Enter master pass...")
 	hg.masterPassEntry.TextStyle = fyne.TextStyle{Monospace: true}
 	// Pressing Return will trigger the same action as "Generate"
 	hg.masterPassEntry.OnSubmitted = func(_ string) {
@@ -150,7 +196,7 @@ func (hg *HashGenerator) setupUI() {
 
 	// Length entry
 	hg.lengthEntry = widget.NewEntry()
-	hg.lengthEntry.SetPlaceHolder("Enter desired length (e.g. 12)")
+	hg.lengthEntry.SetPlaceHolder("Num char")
 	hg.lengthEntry.SetText(hg.appPrefs.LastLength)
 	hg.lengthEntry.OnChanged = func(text string) {
 		// Save preference when changed
@@ -160,7 +206,7 @@ func (hg *HashGenerator) setupUI() {
 
 	// Iterations entry
 	hg.iterationsEntry = widget.NewEntry()
-	hg.iterationsEntry.SetPlaceHolder("Enter number of iterations (e.g. 1)")
+	hg.iterationsEntry.SetPlaceHolder("Num hashes")
 	hg.iterationsEntry.SetText(hg.appPrefs.LastIter)
 	hg.iterationsEntry.OnChanged = func(text string) {
 		// Save preference when changed
@@ -240,6 +286,13 @@ func (hg *HashGenerator) setupUI() {
 		hg.filterSettings(hg.filterEntry.Text)
 	})
 	hg.hideZeroIterBox.SetChecked(hg.appPrefs.HideZeroIter)
+
+	// Checkbox to enable/disable auto copy to clipboard
+	hg.copyToClipboard = widget.NewCheck("Auto Copy", func(checked bool) {
+		hg.appPrefs.CopyToClipboard = checked
+		hg.saveAppPreferences()
+	})
+	hg.copyToClipboard.SetChecked(hg.appPrefs.CopyToClipboard)
 }
 
 func (hg *HashGenerator) createUI() fyne.CanvasObject {
@@ -247,13 +300,17 @@ func (hg *HashGenerator) createUI() fyne.CanvasObject {
 	form := container.NewVBox(
 		container.NewBorder(nil, nil, widget.NewLabel("Description:"), nil, hg.descriptionEntry),
 		container.NewBorder(nil, nil, widget.NewLabel("Master Pass:"), nil, hg.masterPassEntry),
-		hg.algorithmSelect,
-		hg.charRestSelect,
-		container.NewBorder(nil, nil, widget.NewLabel("Length:"), nil, hg.lengthEntry),
-		container.NewBorder(nil, nil, widget.NewLabel("Iterations:"), nil, hg.iterationsEntry),
+		container.NewGridWithColumns(2,
+			hg.algorithmSelect,
+			container.NewBorder(nil, nil, widget.NewLabel("Iterations:"), nil, hg.iterationsEntry),
+		),
+		container.NewGridWithColumns(2,
+			hg.charRestSelect,
+			container.NewBorder(nil, nil, widget.NewLabel("Length:"), nil, hg.lengthEntry),
+		),
 		widget.NewSeparator(),
-		hg.genButton,
-		hg.outputEntry,
+		container.NewBorder(nil, nil, nil, hg.copyToClipboard, hg.genButton),
+		container.NewThemeOverride(hg.outputEntry, NewHashTheme(1.6)),
 	)
 
 	// Create backup/restore buttons container
@@ -267,10 +324,10 @@ func (hg *HashGenerator) createUI() fyne.CanvasObject {
 	settingsPanel := container.NewBorder(
 		container.NewVBox(
 			widget.NewSeparator(),
+			widget.NewLabelWithStyle("Saved Settings", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
 			container.NewBorder(nil, nil, nil, hg.hideZeroIterBox,
-				widget.NewLabelWithStyle("Saved Settings", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+				hg.filterEntry,
 			),
-			hg.filterEntry,
 		),
 		backupRestoreContainer,
 		nil, nil,
@@ -347,10 +404,9 @@ func (hg *HashGenerator) generateHash() {
 	hg.outputEntry.SetText(processed)
 
 	// Copy to clipboard
-	hg.app.Clipboard().SetContent(processed)
-
-	// Show success message
-	//dialog.ShowInformation("Success", "Hash generated and copied to clipboard!", hg.window)
+	if hg.copyToClipboard.Checked {
+		hg.app.Clipboard().SetContent(processed)
+	}
 }
 
 func (hg *HashGenerator) getHashWithIterations(input string, algorithm string, iterations string) (string, error) {
@@ -500,16 +556,18 @@ func (hg *HashGenerator) saveAppPreferences() {
 // Load app preferences and restore last used settings
 func (hg *HashGenerator) loadAppPreferences() {
 
+	//load defaults first
+	hg.appPrefs = hg.DefaultAppPrefs()
+
 	prefsData := hg.app.Preferences().StringWithFallback("appPreferences", "")
 	if prefsData == "" {
-		// No saved preferences, use defaults
-		hg.appPrefs = hg.DefaultAppPrefs()
+		// No saved preferences, stay with defaults
 		return
 	}
 
 	err := json.Unmarshal([]byte(prefsData), &hg.appPrefs)
 	if err != nil {
-		// Error parsing preferences, use defaults
+		// Error parsing preferences, reload defaults
 		hg.appPrefs = hg.DefaultAppPrefs()
 		return
 	}
@@ -523,6 +581,7 @@ func (hg *HashGenerator) DefaultAppPrefs() AppPreferences {
 		LastLength:      "12",
 		LastIter:        "1",
 		HideZeroIter:    true,
+		CopyToClipboard: true,
 		LastFilter:      "",
 	}
 }
