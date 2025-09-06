@@ -19,10 +19,10 @@ func (hg *HashGenerator) updateFilteredKeys(filterText string) {
 	for _, key := range allKeys {
 		setting := hg.savedSettings[key]
 
-		// Check if we should hide zero iteration settings
+		// Check if we should hide hobbled settings
 		if hg.hideZeroIterBox.Checked {
 			iterations, err := strconv.Atoi(setting.Iterations)
-			if err == nil && iterations == 0 {
+			if err == nil && iterations <= 0 {
 				continue // Skip this setting if it has 0 iterations and we're hiding them
 			}
 		}
