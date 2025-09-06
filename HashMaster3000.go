@@ -155,6 +155,15 @@ func (hg *HashGenerator) setupUI() {
 		hg.appPrefs.LastDescription = text
 		hg.saveAppPreferences()
 	}
+	hg.descriptionEntry.Validator = func(text string) error {
+		if text == "" {
+			return fmt.Errorf("description cannot be empty")
+		}
+		return nil
+	}
+	// Force validation on startup if empty
+	hg.descriptionEntry.FocusGained()
+	hg.descriptionEntry.FocusLost()
 
 	// Master password entry
 	hg.masterPassEntry = widget.NewPasswordEntry()
@@ -164,6 +173,15 @@ func (hg *HashGenerator) setupUI() {
 	hg.masterPassEntry.OnSubmitted = func(_ string) {
 		hg.generateHash()
 	}
+	hg.masterPassEntry.Validator = func(text string) error {
+		if text == "" {
+			return fmt.Errorf("master password cannot be empty")
+		}
+		return nil
+	}
+	// Force validation on startup to make it clear it's required
+	hg.masterPassEntry.FocusGained()
+	hg.masterPassEntry.FocusLost()
 
 	// Algorithm selection
 	hg.algorithmSelect = widget.NewSelect([]string{
@@ -203,6 +221,19 @@ func (hg *HashGenerator) setupUI() {
 		hg.appPrefs.LastLength = text
 		hg.saveAppPreferences()
 	}
+	hg.lengthEntry.Validator = func(text string) error {
+		// non-negative integer or empty (means no length restriction)
+		if text == "" {
+			return nil
+		}
+		if num, err := strconv.Atoi(text); err != nil || num < 0 {
+			return fmt.Errorf("length must be a non-negative integer")
+		}
+		return nil
+	}
+	// Force validation on startup
+	hg.lengthEntry.FocusGained()
+	hg.lengthEntry.FocusLost()
 
 	// Iterations entry
 	hg.iterationsEntry = widget.NewEntry()
@@ -213,6 +244,16 @@ func (hg *HashGenerator) setupUI() {
 		hg.appPrefs.LastIter = text
 		hg.saveAppPreferences()
 	}
+	hg.iterationsEntry.Validator = func(text string) error {
+		// Must be a positive integer
+		if num, err := strconv.Atoi(text); err != nil || num < 1 {
+			return fmt.Errorf("iterations must be a positive integer")
+		}
+		return nil
+	}
+	// Force validation on startup
+	hg.iterationsEntry.FocusGained()
+	hg.iterationsEntry.FocusLost()
 
 	// Generate button
 	hg.genButton = widget.NewButton("Generate", hg.generateHash)
@@ -370,16 +411,17 @@ func (hg *HashGenerator) updateFilteredKeys(filterText string) {
 }
 
 func (hg *HashGenerator) generateHash() {
-	description := hg.descriptionEntry.Text
-	masterPass := hg.masterPassEntry.Text
 
-	if description == "" || masterPass == "" {
-		dialog.ShowError(fmt.Errorf("both description and master password tokens are required"), hg.window)
+	if hg.descriptionEntry.Validate() != nil {
 		return
 	}
-
-	// Save current settings (but not master password or output)
+	description := hg.descriptionEntry.Text
 	hg.saveSetting(description)
+
+	if hg.masterPassEntry.Validate() != nil || hg.iterationsEntry.Validate() != nil || hg.lengthEntry.Validate() != nil {
+		return
+	}
+	masterPass := hg.masterPassEntry.Text
 
 	// Combine the tokens
 	combined := description + masterPass
