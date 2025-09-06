@@ -164,9 +164,12 @@ func (hg *HashGenerator) makeUIcomponents() {
 
 			label.SetText(setting.Description)
 			label.OnTapped = func() {
+				hg.settingsList.Select(id)
 				hg.loadSetting(key)
 			}
 			label.OnTappedSecondary = func(pos *fyne.PointEvent) {
+				hg.settingsList.Select(id)
+				hg.loadSetting(key)
 				menu := fyne.NewMenu("",
 					fyne.NewMenuItem("Delete", func() {
 						hg.deleteSetting(key)
