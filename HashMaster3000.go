@@ -68,6 +68,29 @@ func (t *hashTheme) Icon(name fyne.ThemeIconName) fyne.Resource {
 	return t.Theme.Icon(name)
 }
 
+// custom label that supports click events
+type ClickableLabel struct {
+	*widget.Label
+	OnTapped          func()
+	OnTappedSecondary func(*fyne.PointEvent)
+}
+
+func NewClickableLabel(text string) *ClickableLabel {
+	label := &ClickableLabel{
+		widget.NewLabel(text),
+		func() {},                 // default no-op
+		func(*fyne.PointEvent) {}, // default no-op
+	}
+	label.ExtendBaseWidget(label)
+	return label
+}
+func (l *ClickableLabel) Tapped(_ *fyne.PointEvent) {
+	l.OnTapped()
+}
+func (l *ClickableLabel) TappedSecondary(pos *fyne.PointEvent) {
+	l.OnTappedSecondary(pos)
+}
+
 type SavedSetting struct {
 	Description      string `json:"description"`
 	Algorithm        string `json:"algorithm"`
@@ -288,10 +311,7 @@ func (hg *HashGenerator) setupUI() {
 			return len(hg.filteredKeys)
 		},
 		func() fyne.CanvasObject {
-			return container.NewBorder(nil, nil, nil,
-				widget.NewButton("Del", nil),
-				widget.NewLabel("Setting"),
-			)
+			return NewClickableLabel("ListTemplateItemDummyText")
 		},
 		func(id widget.ListItemID, obj fyne.CanvasObject) {
 			if id >= len(hg.filteredKeys) {
@@ -299,26 +319,22 @@ func (hg *HashGenerator) setupUI() {
 			}
 			key := hg.filteredKeys[id]
 			setting := hg.savedSettings[key]
-
-			border := obj.(*fyne.Container)
-			label := border.Objects[0].(*widget.Label)
-			deleteBtn := border.Objects[1].(*widget.Button)
+			label := obj.(*ClickableLabel)
 
 			label.SetText(setting.Description)
-
-			deleteBtn.OnTapped = func() {
-				hg.deleteSetting(key)
+			label.OnTapped = func() {
+				hg.loadSetting(key)
+			}
+			label.OnTappedSecondary = func(pos *fyne.PointEvent) {
+				menu := fyne.NewMenu("",
+					fyne.NewMenuItem("Delete", func() {
+						hg.deleteSetting(key)
+					}),
+				)
+				widget.ShowPopUpMenuAtPosition(menu, hg.window.Canvas(), pos.AbsolutePosition)
 			}
 		},
 	)
-
-	// Load setting when item is selected
-	hg.settingsList.OnSelected = func(id widget.ListItemID) {
-		if id >= 0 && id < len(hg.filteredKeys) {
-			key := hg.filteredKeys[id]
-			hg.loadSetting(key)
-		}
-	}
 
 	// Checkbox to hide/unhide zero iteration settings (a way to mark "inactive" settings)
 	hg.hideZeroIterBox = widget.NewCheck("Hide Inactive", func(checked bool) {
