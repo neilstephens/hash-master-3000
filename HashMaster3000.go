@@ -119,7 +119,7 @@ type MergeState struct {
 }
 
 func main() {
-	myApp := app.NewWithID("com.hashmaster3000.app")
+	myApp := app.NewWithID("link.multifarious.hm3k")
 	myApp.SetIcon(nil)
 	myWindow := myApp.NewWindow("Hash Master 3000")
 	myWindow.Resize(fyne.NewSize(400, 700))
