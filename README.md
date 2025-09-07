@@ -14,6 +14,10 @@ That being said, take this as it is: a sloppily implemented library plumbing exe
 
 I use HM3k on Android and Linux, there should be no reason it won't work on Windows, Mac and IOS (anything that Fyne.io supports), but I havn't tried.
 
+# License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
 # Build
 ```
 go mod init HashMaster3000
